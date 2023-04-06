@@ -2,12 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 
 import sendRequest from '../apis/openai';
 import SettingDialog from './Settings/SettingDialog';
-
 import Header from './Header';
 import ConversationPanel from './ConversationPanel';
 import ButtonGroup from './ButtonGroup';
 import InputPanel from './InputPanel';
-import { useGlobalStore } from '../store/module';
+import AzureSpeechToText from './AzureSpeechToText';
+import BrowserSpeechToText from './BrowserSpeechToText';
 
 import {
   speechSynthesis,
@@ -15,9 +15,8 @@ import {
   pauseSpeechSynthesis,
   resumeSpeechSynthesis,
 } from '../utils/speechSynthesis';
-
-import AzureSpeechToText from './AzureSpeechToText';
-import BrowserSpeechToText from './BrowserSpeechToText';
+import { useGlobalStore } from '../store/module';
+import { existEnvironmentVariable, getEnvironmentVariable } from '../helpers/utils';
 
 type baseStatus = 'idle' | 'waiting' | 'speaking' | 'recording' | 'connecting';
 
@@ -74,15 +73,25 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
       case 'Amazon Polly':
         language = speech.pollyLanguage;
         voiceName = speech.pollyVoice;
-        region = key.awsRegion;
-        accessKeyId = key.awsKeyId;
-        secretAccessKey = key.awsKey;
+        region = existEnvironmentVariable('AWS_REGION')
+          ? getEnvironmentVariable('AWS_REGION')
+          : key.awsRegion;
+        accessKeyId = existEnvironmentVariable('AWS_ACCESS_KEY_ID')
+          ? getEnvironmentVariable('AWS_ACCESS_KEY_ID')
+          : key.awsKeyId;
+        secretAccessKey = existEnvironmentVariable('AWS_ACCESS_KEY')
+          ? getEnvironmentVariable('AWS_ACCESS_KEY')
+          : key.awsKey;
         break;
       case 'Azure TTS':
         language = speech.azureLanguage;
         voiceName = speech.azureVoice;
-        region = key.azureRegion;
-        secretAccessKey = key.azureKey;
+        region = existEnvironmentVariable('AZURE_REGION')
+          ? getEnvironmentVariable('AZURE_REGION')
+          : key.azureRegion;
+        secretAccessKey = existEnvironmentVariable('AZURE_KEY')
+          ? getEnvironmentVariable('AZURE_KEY')
+          : key.azureKey;
         break;
     }
 
@@ -143,7 +152,15 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
       conversationsToSent = conversationsToSent.slice(chat.maxMessages * -1);
       conversationsToSent.unshift({ role: 'system', content: chat.systemRole });
       console.log(conversationsToSent);
-      sendRequest(conversationsToSent, key.openaiApiKey, key.openaiHost, (data: any) => {
+
+      const openaiApiKey = existEnvironmentVariable('OPENAI_API_KEY')
+        ? getEnvironmentVariable('OPENAI_API_KEY')
+        : key.openaiApiKey;
+      const openaiApiHost = existEnvironmentVariable('OPENAI_HOST')
+        ? getEnvironmentVariable('OPENAI_HOST')
+        : key.openaiHost;
+
+      sendRequest(conversationsToSent, openaiApiKey, openaiApiHost, (data: any) => {
         setStatus('idle');
         if (data) {
           if ('error' in data) {
@@ -178,6 +195,8 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
     focusInput();
   };
 
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
   const handleInputKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = async event => {
     if (event.keyCode === 13 && !event.shiftKey) {
       event.preventDefault(); // Prevents Enter key from submitting form
@@ -190,10 +209,18 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
         setInput('');
         focusInput();
       }
-      // Handle form submission here
     } else if (event.keyCode === 13 && event.shiftKey) {
       event.preventDefault(); // Prevents Shift+Enter from creating a new line
-      setInput(input + '\n');
+      const cursorPosition = event.currentTarget.selectionStart;
+      setInput(input.slice(0, cursorPosition) + '\n' + input.slice(cursorPosition));
+
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.selectionStart = cursorPosition + 1;
+          inputRef.current.selectionEnd = cursorPosition + 1;
+          inputRef.current.scrollTop = inputRef.current.scrollHeight;
+        }
+      }, 0);
     }
   };
 
@@ -204,8 +231,6 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
     stopSpeechSynthesis();
     notify.resetNotify();
   };
-
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   function focusInput() {
     (inputRef.current as HTMLInputElement | null)?.focus();
@@ -338,8 +363,16 @@ const Content: React.FC<ContentProps> = ({ notify }) => {
       )}
       {voice.service == 'Azure Speech to Text' && (
         <AzureSpeechToText
-          subscriptionKey={key.azureKey}
-          region={key.azureRegion}
+          subscriptionKey={
+            existEnvironmentVariable('AZURE_KEY')
+              ? getEnvironmentVariable('AZURE_KEY')
+              : key.azureKey
+          }
+          region={
+            existEnvironmentVariable('AZURE_REGION')
+              ? getEnvironmentVariable('AZURE_REGION')
+              : key.azureRegion
+          }
           language={voice.azureLanguage}
           isListening={isListening}
           setIsListening={setIsListening}
